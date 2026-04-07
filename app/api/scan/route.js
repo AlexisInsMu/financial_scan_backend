@@ -22,21 +22,38 @@ export async function POST(request) {
     );
   }
 
-  const { ocr_text, user_id } = body;
+  // Si no envían tipo_de_peticion, asumimos 0 (escaneo de ticket)
+  const { texto, ocr_text, tipo_de_peticion = 0, user_id } = body;
+  
+  const textoEntrada = texto || ocr_text;
 
   const userCheck = validarUserId(user_id);
   if (!userCheck.ok) return NextResponse.json(userCheck, { status: 400 });
 
-  const ocrCheck = validarOcrText(ocr_text);
-  if (!ocrCheck.ok) return NextResponse.json(ocrCheck, { status: 422 });
+  if (!textoEntrada || textoEntrada.trim() === '') {
+    return NextResponse.json(
+      { error: 'EMPTY_TEXT', message: 'El texto no puede estar vacío.' }, 
+      { status: 422 }
+    );
+  }
+
+  if (tipo_de_peticion === 0) { // ticket
+    const ocrCheck = validarOcrText(textoEntrada);
+    if (!ocrCheck.ok) return NextResponse.json(ocrCheck, { status: 422 });
+  } else if (textoEntrada.trim().length < 5) { // voz, pero con un mínimo de caracteres para evitar procesar audios sin información útil
+    return NextResponse.json(
+      { error: 'VOICE_TOO_SHORT', message: 'El audio transcrito es muy corto para procesarlo.' }, 
+      { status: 422 }
+    );
+  }
 
   let ticketData;
   try {
-    ticketData = await procesarTicketConGemini(ocr_text);
+    ticketData = await procesarTicketConGemini(textoEntrada, tipo_de_peticion); // Gemini 
   } catch (err) {
     console.error('[Gemini Error]', err.message);
     return NextResponse.json(
-      { error: 'LLM_ERROR', message: 'No se pudo interpretar el ticket. Intenta de nuevo.' },
+      { error: 'LLM_ERROR', message: 'No se pudo interpretar el gasto. Intenta de nuevo.' },
       { status: 502 }
     );
   }
@@ -46,15 +63,19 @@ export async function POST(request) {
     const ticketsCol = db.collection('tickets');
     const usersCol = db.collection('users');
 
+    // Determinamos la fuente para saber si fue OCR o Voz
+    const fuenteGasto = tipo_de_peticion === 1 ? 'dictado_voz' : 'gemini_cloud';
+
     const ticketDoc = {
       user_id:         new ObjectId(user_id),
       created_at:      new Date(),
       procesado_en_ms: Date.now() - startTime,
-      fuente:          'gemini_cloud',
+      fuente:          fuenteGasto,
       raw: {
         comercio:     ticketData.comercio,
         fecha_ticket: ticketData.fecha,
         total:        ticketData.total,
+        texto_original: textoEntrada 
       },
       productos: ticketData.productos,
       analisis: {
@@ -108,6 +129,7 @@ export async function POST(request) {
         gasto_hormiga:     ticketData.gasto_hormiga_ticket,
         ahorro_proyectado: ticketData.ahorro_total_hormiga_mensual,
         mensaje_educativo: ticketData.mensaje_educativo,
+        fuente:            fuenteGasto
       },
       score: {
         valor:    nuevoScore.valor,
