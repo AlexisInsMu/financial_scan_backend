@@ -3,7 +3,6 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '@/lib/mongodb';
 import { verificarAuth } from '@/middleware/auth';
 import { validarUserId } from '@/lib/validators';
-import { generarAnalisisGeneral } from '@/lib/gemini';
 
 export async function GET(request) {
   const auth = verificarAuth(request);
@@ -36,10 +35,6 @@ export async function GET(request) {
     .limit(10)
     .toArray();
     
-    const analisis_general = await generarAnalisisGeneral({
-      userProfile: usuario,
-      ticketsRecientes: ticketsRecientes,
-    });
     return NextResponse.json({
       ok: true,
       score:          usuario.score_salud_ia,
@@ -54,7 +49,6 @@ export async function GET(request) {
         fuente:           t.fuente,
         created_at:       t.created_at,
       })),
-      estado_analsis_general: analisis_general,
 
     });
 
